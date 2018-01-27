@@ -2,8 +2,6 @@
 #include <stdlib.h>
 #include <stdint.h>
 
-#define FLASHLOG_RECORD_NBYTES		80
-#define FLASHLOG_MAX_ADDR		      (FLASH_SIZE_BYTES - FLASHLOG_RECORD_NBYTES) 
 
 
 typedef struct LOG_HDR_ {
