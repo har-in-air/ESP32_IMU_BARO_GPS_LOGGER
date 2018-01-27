@@ -99,9 +99,6 @@ int getNumRecords(char* szFileName) {
 
 
 int printRecords(char* szFileName) {
-   int imuRecordCounter = 0;
-   int baroRecordCounter = 0;
-   int gpsRecordCounter = 0;
 	FILE* fp = fopen(szFileName, "rb");
 	if (fp == NULL) {
 		printf("error opening %s", szFileName);
