@@ -10,4 +10,4 @@ Data is logged to a 128Mbit spi serial flash, and can be uploaded via Wifi with 
 
 Purpose is to log real-time data for offline analysis and algorithm development.
 
-The /docs directory has some example data dumps, and code used to extract the data from the binary log dump, and process it. This was compiled and run on an AMDx64 Ubuntu 16.04LTS platform, and the resulting filtered data charted using LibreOffice.
+The /docs directory has an example binary data log, and code used to extract the data from the log, and process it. This was compiled and run on an AMDx64 Ubuntu 16.04LTS platform, and the resulting filtered data was charted using LibreOffice.
