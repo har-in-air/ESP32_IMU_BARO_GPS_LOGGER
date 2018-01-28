@@ -204,7 +204,7 @@ void processData(char* szFileName, int numRecords, int zInitialCm, float zAccelV
 
 // Structs seem to be packed without using any special compiler directives
 // Using gcc, ubuntu 16.04, AMD x64 
-// gcc -o zaccelbaro zaccelbaro.c
+// gcc -o zaccelbaro zaccelbaro.c imu.c kalmanfilter2.c kalmanfilter3.c -lm
 //  
 // And ESP32 is also little endian, so no problem reading the structures from the binary file.
 
