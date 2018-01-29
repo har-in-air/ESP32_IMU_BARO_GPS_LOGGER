@@ -64,39 +64,33 @@ int getNumRecords(char* szFileName) {
    return imuRecordCounter;
    }
 
-#define FIFO_SIZE    15
+#define RINGBUF_SIZE    15
 
-typedef struct FIFO_ {
+typedef struct RINGBUF_ {
    int head;
-   float buffer[FIFO_SIZE];
-} FIFO;
+   float buffer[RINGBUF_SIZE];
+} RINGBUF;
 
-FIFO Fifo;
+RINGBUF RingBuf;
 
-void fifo_init() {
-   memset(Fifo.buffer,0,FIFO_SIZE);
-   Fifo.head = FIFO_SIZE-1;
+void ringbuf_init() {
+   memset(RingBuf.buffer,0,RINGBUF_SIZE);
+   RingBuf.head = RINGBUF_SIZE-1;
    }
 
-void fifo_addSample(float sample) {
-   Fifo.head++;
-   if (Fifo.head >= FIFO_SIZE) Fifo.head = 0;
-   Fifo.buffer[Fifo.head] = sample;
+void ringbuf_addSample(float sample) {
+   RingBuf.head++;
+   if (RingBuf.head >= RINGBUF_SIZE) RingBuf.head = 0;
+   RingBuf.buffer[RingBuf.head] = sample;
    }
 
 
-float fifo_getOldestSample() {
-   int index = Fifo.head+1;
-   if (index >= FIFO_SIZE) index = 0;
-   return Fifo.buffer[index];
-   }
-
-float fifo_averageOldestSamples(int numSamples) {
-   int index = Fifo.head+1; // oldest Sample
+float ringbuf_averageOldestSamples(int numSamples) {
+   int index = RingBuf.head+1; // oldest Sample
    float accum = 0.0;
    for (int count = 0; count < numSamples; count++) {
-      if (index >= FIFO_SIZE) index = 0;
-      accum += Fifo.buffer[index];
+      if (index >= RINGBUF_SIZE) index = 0;
+      accum += RingBuf.buffer[index];
       index++;
       }
    return accum/numSamples;
@@ -200,7 +194,7 @@ void processData(char* szFileName, int numRecords, int zInitialCm, float zAccelV
    // since we're polling for the data, not using the drdy interrupt on the MAX21100, so we are not perfectly 
    // in sync with the imu anyway.
 
-   fifo_init();
+   ringbuf_init();
 
    float kf2Z, kf2V;
    float kf3Z, kf3V;
@@ -214,12 +208,12 @@ void processData(char* szFileName, int numRecords, int zInitialCm, float zAccelV
       		int imuSize = fread(&imu,1, sizeof(IMU_RECORD), fp);
             if (imuSize == sizeof(IMU_RECORD)) {
                float zacc = getzaccel(imu.gxNEDdps, imu.gyNEDdps, imu.gzNEDdps, imu.axNEDmG, imu.ayNEDmG, imu.azNEDmG);
-               fifo_addSample(zacc);
+               ringbuf_addSample(zacc);
                } 
             if (hdr.baroFlags || hdr.gpsFlags) {
       		   int baroSize = fread(&baro,1, sizeof(BARO_RECORD), fp);
                if ((baroSize == sizeof(BARO_RECORD)) && (baro.heightMSLcm != 0)) {
-                  float zAverageAccel = fifo_averageOldestSamples(10);
+                  float zAverageAccel = ringbuf_averageOldestSamples(10);
                   kalmanFilter2_Update((float)baro.heightMSLcm, zAccelVariance,0.020, &kf2Z, &kf2V);
                   kalmanFilter3_Update((float)baro.heightMSLcm, zAverageAccel,0.020, &kf3Z, &kf3V);
                   //printf("%d %d : %d\r\n", baro.heightMSLcm, (int) kf3Z, (int)kf3V);
