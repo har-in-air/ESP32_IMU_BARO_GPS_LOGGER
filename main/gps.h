@@ -1,6 +1,8 @@
 #ifndef GPS_H_
 #define GPS_H_
 
+// ATGM332D-5N gps module, supposed to be replacement for Ublox Neo-M8N
+// Configured to transmit only UBX NAV_PVT binary packet @ 10Hz and 115200 baud
 
 #define NAV_PVT_PKT_NUM_BYTES   	94
 #define GPS_MAX_PKTS             4
@@ -85,27 +87,16 @@ typedef struct NAV_PVT_PKT_ {
 	uint8_t     ckB;
 } NAV_PVT_PKT;
 
-
 typedef union NAV_PVT_ {
-	NAV_PVT_PKT pkt;
-	uint8_t buf[NAV_PVT_PKT_NUM_BYTES];
+   uint8_t buffer[NAV_PVT_PKT_NUM_BYTES];
+   NAV_PVT_PKT pkt;
 } NAV_PVT;
 
-typedef struct GPS_PKT_	{
-    int receivedBytes;
-    int status;
-    NAV_PVT navpvt;
-    } GPS_PKT;
-
-
-extern int 	GpsNavUpdated;
-extern GPS_PKT  GpsPkt[GPS_MAX_PKTS];
-
-extern int  GpsHeightm;
+extern volatile int GpsHeightm;// for lcd display to compare with baro before starting logging
 						
 int gps_PacketChecksum(uint8_t* pBuf, int numBytes);
-void gps_StateMachine(uint8_t byte);
-void  gps_Config(void);
-void gps_UpdateLogRecord(int pktIndex);
+void gps_StateMachine();
+int  gps_Config(void);
+void gps_UpdateLogRecord();
 
 #endif

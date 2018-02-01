@@ -3,7 +3,6 @@
 #include "soc/gpio_reg.h"
 #include "soc/io_mux_reg.h"
 #include "driver/gpio.h"
-#include "driver/uart.h"
 #include "hal/esp32-hal-gpio.h"
 
 #include "spihw.h"
@@ -18,6 +17,7 @@
 #include "myadc.h"
 #include "flashlog.h"
 #include "mwifi.h"
+#include "nvs.h"
 
 #define TAG  "main"
 
@@ -31,10 +31,8 @@ int IsServer = 0;
 volatile int ledState = 0;
 float yaw, pitch, roll;
 
-
-static intr_handle_t s_timer_handle;
-
-volatile SemaphoreHandle_t imuSemaphore;
+volatile SemaphoreHandle_t drdySemaphore;
+volatile int drdyFlag = 0;
 	
 void pinConfig() {	
 	pinMode(pinBTN0, INPUT); // already pulled up by 10K resistor
@@ -55,39 +53,19 @@ void pinConfig() {
 	pinMode(pinLED, OUTPUT);
 	LED_OFF();
 	
-	pinMode(pinDRDYINT, INPUT);
+	pinMode(pinDRDYINT, INPUT_PULLDOWN);
 	}
 
 
-static void timer_isr(void* arg){
-   TIMERG0.int_clr_timers.t0 = 1;
-   TIMERG0.hw_timer[0].config.alarm_en = 1;
-   BaseType_t xHigherPriorityTaskWoken = pdFALSE;
-   xSemaphoreGiveFromISR(imuSemaphore, &xHigherPriorityTaskWoken);
-  	if( xHigherPriorityTaskWoken == pdTRUE) {
-     	portYIELD_FROM_ISR(); // this wakes up imubaro_task immediately
-	   }
-   }
 
-
-void init_timer(void){	
-   timer_config_t config = {
-      .alarm_en = true,
-      .counter_en = false,
-      .intr_type = TIMER_INTR_LEVEL,
-      .counter_dir = TIMER_COUNT_UP,
-      .auto_reload = true,
-      .divider = 80   // timer runs off 80mhz bus clock, so 1 us per tick 
-      };
-    
-   timer_init(TIMER_GROUP_0, TIMER_0, &config);
-   timer_set_counter_value(TIMER_GROUP_0, TIMER_0, 0);
-   timer_set_alarm_value(TIMER_GROUP_0, TIMER_0, 1000); // 1000ticks == 1ms
-   timer_enable_intr(TIMER_GROUP_0, TIMER_0);
-   timer_isr_register(TIMER_GROUP_0, TIMER_0, &timer_isr, NULL, 0, &s_timer_handle);
-
-	imuSemaphore = xSemaphoreCreateBinary();
-	timer_start(TIMER_GROUP_0, TIMER_0);
+void drdyHandler(void) {
+	drdyFlag = 1;
+	BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+	xSemaphoreGiveFromISR(drdySemaphore, &xHigherPriorityTaskWoken);
+    if( xHigherPriorityTaskWoken == pdTRUE) {
+        portYIELD_FROM_ISR(); // this wakes up imu_task immediately instead of on next FreeRTOS tick
+		}
+	//LED_TOGGLE();
 	}
 
 	
@@ -113,7 +91,8 @@ static void imubaro_task() {
 	MAX21100_InitCalibrationParams();
 	MAX21100_ConfigureGyroAccelMag();
 	LED_ON();
-   int counter = 8;
+#if 1
+   int counter = 3;
    while (counter--) {
    	lcd_printf(0,24, "Gyro calib in %ds", counter+1);
       delayMs(1000);	
@@ -121,11 +100,27 @@ static void imubaro_task() {
 	LED_OFF();
 
 	MAX21100_CalibrateGyro();
+   nvs_SaveGyro();
    lcd_printf(0,24,"                ");  
   	lcd_printf(0,24, "x %d y %d z %d", gxBias, gyBias, gzBias);
    delayMs(3000);	
    lcd_printf(0,24,"                ");  
-	//MAX21100_CalibrateAccel();
+#endif
+#if 0
+	MAX21100_CalibrateAccel();
+   nvs_SaveAccel();
+#endif
+#if 0
+   lcd_printf(0,24,"Cal Mag         ");     
+   lcd_printf(0,32,"                ");     
+   MAX21100_CalibrateMag();
+   lcd_printf(0,24, "b %d  %d  %d", mxBias, myBias, mzBias);
+   lcd_printf(0,32, "s %d  %d  %d", mxSensitivity, mySensitivity, mzSensitivity);
+   nvs_SaveMag();
+   while(1) {
+      delayMs(5000);
+      }
+#endif
 
 	if (!MS5611_Configure()) {
 		ESP_LOGE(TAG, "Failure configuring MS5611");
@@ -156,22 +151,25 @@ static void imubaro_task() {
 	ESP_LOGI(TAG, "max21100 read status + read data = %dus", eus); // ~110 us
 #endif
 
-	int drdyCounter = 0;
-   int baroCounter = 0;	
+	int gyrodrCounter = 0;
+   int baroSampleCounter = 0;	
+
+	drdySemaphore = xSemaphoreCreateBinary();
+	attachInterrupt(pinDRDYINT, drdyHandler, RISING);
+	MAX21100_Read8(MAX21100_SYSTEM_STATUS);
+
 	while (1) {		
-		xSemaphoreTake(imuSemaphore, portMAX_DELAY);
-      baroCounter++; // ticks every 1mS
+		xSemaphoreTake(drdySemaphore, portMAX_DELAY);
+      baroSampleCounter++; // ticks every 2mS
 		uint8_t status = MAX21100_Read8(MAX21100_SYSTEM_STATUS);
 		uint8_t gyrodr = ((status & STATUS_GYRO_DR) && !(status & STATUS_GYRO_ERR)) ? 1 : 0;
-		// imu output data rate is ~500Hz (~2mS interval). We check every 1mS to make sure we don't
-		// miss a sample
 		if (gyrodr) {
-   		drdyCounter++; // ticks every 2mS
-			MAX21100_GetGyroAccelMagData(gyrodps, accelmG, mag);			
+   	   gyrodrCounter++; // ticks every 2mS
+		   MAX21100_GetGyroAccelMagData(gyrodps, accelmG, mag);			
          // xned = silkscreen y = forward = north
          // yned = silkscreen x = right = east
          // zned = down
-			gxNEDdps = gyrodps[1];
+		   gxNEDdps = gyrodps[1];
 			gyNEDdps = gyrodps[0];
 			gzNEDdps = -gyrodps[2];
 			
@@ -190,108 +188,92 @@ static void imubaro_task() {
 #endif
 	
 			if (FlashLogMutex) {
-				if (xSemaphoreTake( FlashLogMutex, portMAX_DELAY )) {               
-					FlashLogRecord.imu.gxNEDdps = gxNEDdps;
-					FlashLogRecord.imu.gyNEDdps = gyNEDdps;
-					FlashLogRecord.imu.gzNEDdps = gzNEDdps;
-					FlashLogRecord.imu.axNEDmG = axNEDmG;
-					FlashLogRecord.imu.ayNEDmG = ayNEDmG;
-					FlashLogRecord.imu.azNEDmG = azNEDmG;
-					FlashLogRecord.imu.mxNED = mxNED;
-					FlashLogRecord.imu.myNED = myNED;
-					FlashLogRecord.imu.mzNED = mzNED;
-					if (IsLogging) {
-						LED_ON();
-						FlashLog_WriteRecord(&FlashLogRecord); // worst case 80byes : ~130uS intra-page, ~210uS across page boundary
+			   if (xSemaphoreTake( FlashLogMutex, portMAX_DELAY )) {               
+				  	FlashLogRecord.imu.gxNEDdps = gxNEDdps;
+				   FlashLogRecord.imu.gyNEDdps = gyNEDdps;
+				   FlashLogRecord.imu.gzNEDdps = gzNEDdps;
+				   FlashLogRecord.imu.axNEDmG = axNEDmG;
+				   FlashLogRecord.imu.ayNEDmG = ayNEDmG;
+				   FlashLogRecord.imu.azNEDmG = azNEDmG;
+				   FlashLogRecord.imu.mxNED = mxNED;
+				   FlashLogRecord.imu.myNED = myNED;
+				   FlashLogRecord.imu.mzNED = mzNED;
+				   if (IsLogging) {
+					   LED_ON();
+                  // worst case imu+baro+gps record = 80bytes,
+                  //  ~130uS intra-page, ~210uS across page boundary
+					   FlashLog_WriteRecord(&FlashLogRecord); 
                   memset(&FlashLogRecord, 0, sizeof(FLASHLOG_RECORD));
-						LED_OFF();
+				      LED_OFF();
 						}
 					xSemaphoreGive( FlashLogMutex );
 					}			
-				}
+			   }  
 
-			if (drdyCounter >= 500) { // once every second
-				drdyCounter = 0; 
+			if (gyrodrCounter >= 500) { // once every second
+			   gyrodrCounter = 0; 
 #if 0
-				imu_Quaternion2YawPitchRoll(q0, q1, q2, q3, &yaw, &pitch, &roll);
-				ESP_LOGI(TAG,"ypr %4d %3d %3d, alt %d", (int)yaw, (int)pitch, (int)roll, (int)zCmSample);
+				//imu_Quaternion2YawPitchRoll(q0, q1, q2, q3, &yaw, &pitch, &roll);
+				//ESP_LOGI(TAG,"ypr %4d %3d %3d, alt %d", (int)yaw, (int)pitch, (int)roll, (int)zCmSample);
 				//lcd_printf(0,40,"ypr %4d %3d %3d", (int)yaw, (int)pitch, (int)roll);
-				//ESP_LOGI(TAG,"Ax  %.1f  Ay  %.1f   Az  %.1f", accelmG[0], accelmG[1], accelmG[2]);
-				//ESP_LOGI(TAG,"Gx  %.1f  Gy  %.1f   Gz  %.1f", gyrodps[0], gyrodps[1], gyrodps[2]);
-				//ESP_LOGI(TAG,"Mx  %.1f  My  %.1f   Mz  %.1f",magraw[0], magraw[1], magraw[2]);
+				ESP_LOGI(TAG,"Ax  %.1f  Ay  %.1f   Az  %.1f", accelmG[0], accelmG[1], accelmG[2]);
+				ESP_LOGI(TAG,"Gx  %.1f  Gy  %.1f   Gz  %.1f", gyrodps[0], gyrodps[1], gyrodps[2]);
+				ESP_LOGI(TAG,"Mx  %.1f  My  %.1f   Mz  %.1f", mag[0], mag[1], mag[2]);
 				//lcd_printf(0,0,"%4d %4d %4d", (int)accelmG[0], (int)accelmG[1], (int)accelmG[2]);
 				//lcd_printf(0,16,"%4d %4d %4d", (int)gyrodps[0], (int)gyrodps[1], (int)gyrodps[2]);
-				//lcd_printf(0,32,"%4d %4d %4d", (int)mxmin, (int)mymin, (int)mzmin);
-				//lcd_printf(0,40,"%4d %4d %4d", (int)mxmax, (int)mymax, (int)mzmax);
-				//lcd_printf(0,32,"%4d %4d %4d", (int)magraw[0], (int)magraw[1], (int)magraw[2]);
+				//lcd_printf(0,32,"%4d %4d %4d", (int)mag[0], (int)mag[1], (int)mag[2]);
 				//lcd_printf(0,0,"%4d %4d %4d", (int)axNED, (int)ayNED, (int)azNED);
 				//lcd_printf(0,16,"%4d %4d %4d", (int)gxNED, (int)gyNED, (int)gzNED);
 				//lcd_printf(0,32,"%4d %4d %4d", (int)mxNED, (int)myNED, (int)mzNED);
 #endif
-				}	
-			} // if (gyrodr)
-      if (baroCounter >= 10) {
-         baroCounter = 0; // 10mS sample interval
-		   // temperature + pressure => 20mS for a new altitude sample
-		   int zMeasurementAvailable = MS5611_SampleStateMachine();
-		   if (zMeasurementAvailable) {
-			   if (FlashLogMutex) {
-			   	if ( xSemaphoreTake( FlashLogMutex, portMAX_DELAY )) {
-                  FlashLogRecord.hdr.baroFlags = 1;
-					   FlashLogRecord.baro.heightMSLcm = zCmSample;
-					   xSemaphoreGive( FlashLogMutex );
-					   }
-				   }
-			   }  
-		   } // baroCounter
+				   }	
+			   } // if (gyrodr)
+         if (baroSampleCounter >= 5) {
+            baroSampleCounter = 0; // 10mS sample interval
+		      // temperature + pressure => 20mS for a new altitude sample
+		      int zMeasurementAvailable = MS5611_SampleStateMachine();
+		      if (zMeasurementAvailable) {
+			      if (FlashLogMutex) {
+			   	   if ( xSemaphoreTake( FlashLogMutex, portMAX_DELAY )) {
+                     FlashLogRecord.hdr.baroFlags = 1;
+					      FlashLogRecord.baro.heightMSLcm = zCmSample;
+					      xSemaphoreGive( FlashLogMutex );
+					      }
+				      }
+			      }    
+		      } // baroSampleCounter
       } //while 1
 	} 
 	
 	
 static void gps_task() {
 	ESP_LOGI(TAG, "gps task started");
-    const int uart_num = UART_NUM_1;
-    uart_config_t uart_config = {
-        .baud_rate = 115200,
-        .data_bits = UART_DATA_8_BITS,
-        .parity = UART_PARITY_DISABLE,
-        .stop_bits = UART_STOP_BITS_1,
-        .flow_ctrl = UART_HW_FLOWCTRL_DISABLE
-		};
-    uart_param_config(uart_num, &uart_config);
-    uart_set_pin(uart_num, pinGpsTXD, pinGpsRXD, pinGpsRTS, pinGpsCTS);
-    uart_driver_install(uart_num, UART_RX_BUFFER_SIZE * 2, 0, 0, NULL, 0);
-    gps_Config();
-    uint8_t* rcvBuffer = (uint8_t*) malloc(UART_RX_BUFFER_SIZE);
-    while(1) {
-       int len = uart_read_bytes(uart_num, rcvBuffer, UART_RX_BUFFER_SIZE, 20 / portTICK_RATE_MS);
-		 if (len) {
-		   for (int inx = 0; inx < len; inx++) { 
-		      gps_StateMachine(rcvBuffer[inx]);
-				}
-		   }
-	   }//while
+   gps_Config();
+   while(1) {
+		 gps_StateMachine();
+		 }		   
    }
 
 	
 	
 void app_main() {
-	nvs_flash_init();
 	pinConfig();
 	ESP_LOGI(TAG, "IMU-BARO-GPS data logger compiled on %s at %s", __DATE__, __TIME__);
 
 	delayMs(100);
+   nvs_Init();
+
 	lcd_init();
    lcd_home();
    lcd_setFont(Font_6x8);
 
    uint32_t batVoltage = (uint32_t)(4.44f*adc_Sample()); // resistor ratio is 4.33,scaling error = 1.02
-	ESP_LOGI(TAG, "Battery Voltage = %d.%03dmV", batVoltage/1000, batVoltage%1000);
+	ESP_LOGI(TAG, "Battery Voltage = %d.%03dV", batVoltage/1000, batVoltage%1000);
 	lcd_printf(0,0,"Bat %d.%03dV", batVoltage/1000,batVoltage%1000);
 
 	SpiHW_Config(pinSCLK, pinMOSI, pinMISO, SPI_CLOCK_LOW_FREQHZ);
 
-	if (!FlashLog_Init()) {
+	if (FlashLog_Init() < 0) {
 		ESP_LOGE(TAG, "Spi flash log error");
 		lcd_printf(0,8,"Flash Error");		
 		while (1) {
@@ -301,7 +283,6 @@ void app_main() {
 			delayMs(100);
 			}
 		}
-	ESP_LOGI(TAG, "Flash Free Address %08d", FlashLogFreeAddress);
 	lcd_printf(0,8,"Flash %08d",  FlashLogFreeAddress);
 
 #if 0
@@ -325,10 +306,12 @@ void app_main() {
    eus = cct_ElapsedUs();
 	ESP_LOGI(TAG, "Flashlog write record = %dus", eus);
 #endif
-	ESP_LOGI(TAG,"Press BTN15 within 4 seconds to erase flash");
+
+#if 1
+	ESP_LOGI(TAG,"Press BTN15 within 2 seconds to erase flash");
 	LED_ON();
    int bEraseFlag = 0;
-   int counter = 400;
+   int counter = 200;
    while (counter--) {
    	lcd_printf(0,16, "BTN15 Erase %ds  ",(counter+50)/100);
 	   if (!BTN15()) {
@@ -350,10 +333,10 @@ void app_main() {
 	
    delayMs(2000);
 		
-	ESP_LOGI(TAG,"Press BTN0 within 4 seconds to start download server");
+	ESP_LOGI(TAG,"Press BTN0 within 2 seconds to start download server");
 	LED_ON();
    IsServer = 0;
-   counter = 400;
+   counter = 200;
    while (counter--) {
    	lcd_printf(0,16, "BTN0 Server %ds  ",(counter+50)/100);
 	   if (!BTN0()) {
@@ -364,6 +347,7 @@ void app_main() {
       delayMs(10);
 		}
 	LED_OFF();
+#endif
 
    if (IsServer) {
 		tcpip_adapter_init();
@@ -385,7 +369,6 @@ void app_main() {
 		lcd_printf(0,16,"Data Logger Mode");
       ESP_LOGI(TAG, "Logger Mode started");
       delayMs(2000);
-		init_timer();		
 		xTaskCreatePinnedToCore(&imubaro_task, "imubarotask", 2048, NULL, 20, NULL, 0);
 		xTaskCreatePinnedToCore(&gps_task, "gpstask", 2048, NULL, 20, NULL, 1);
 		}

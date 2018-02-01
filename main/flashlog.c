@@ -35,36 +35,38 @@ void FlashLog_Erase(void) {
 	
 int FlashLog_Init(void ) {
 	uint16_t flashID = SpiFlash_ReadID();
-	//if (flashID != 0xEF14) {
-	//	ESP_LOGE(TAG, "Winbond W25Q16BV ID [expected EF14] = %04X", flashID);
-	//	return 0;
-	//	}
 	if (flashID != 0xEF17) {
 		ESP_LOGE(TAG, "Winbond W25Q128FVSG ID [expected EF17] = %04X", flashID);
-		return 0;
+		return -1;
 		}
 	IsLogging = 0;
 	SpiFlash_GlobalUnprotect();
 	FlashLogMutex = xSemaphoreCreateMutex();
 	if (FlashLogMutex == NULL) {
 		ESP_LOGE(TAG, "Error creating FlashLogMutex");
-		return 0;
+		return -2;
 		}
-   int numRecords;
-	FlashLog_GetFreeAddress(&numRecords);
-	ESP_LOGI(TAG,"Flash Free Address = %08d\r\nNumFlashRecords = %d", FlashLogFreeAddress, numRecords);
-	return 1;
+	FlashLogFreeAddress = FlashLog_GetFreeAddress();
+	ESP_LOGI(TAG,"FlashLogFreeAddress = %08d", FlashLogFreeAddress);
+	return 0;
 	}
+
+
+int FlashLog_IsEmpty() {
+   uint32_t dw;
+   SpiFlash_ReadBuffer(0, (uint8_t*)&dw, sizeof(uint32_t));
+   return (dw == 0xFFFF) ? 1 : 0;
+   }
 
 
 // if there is only an IMU record, size of record = HDR + IMU
 // if there is a BARO record, size of record = HDR + IMU + BARO
 // if there is a GPS record, size of record = HDR + IMU + BARO + GPS even if BARO record is invalid
 
-void FlashLog_GetFreeAddress(int* pNumRecords) {
+int FlashLog_GetNumRecords() {
    uint32_t addr = 0;
-   uint32_t maxAddr = FLASHLOG_MAX_ADDR - sizeof(FLASHLOG_RECORD); 
-   *pNumRecords = 0;
+   uint32_t maxAddr = FLASH_SIZE_BYTES - sizeof(FLASHLOG_RECORD); 
+   int numRecords = 0;
    while (1) {
       if (addr >= maxAddr) break; // flash is full
       LOG_HDR hdr;
@@ -74,13 +76,33 @@ void FlashLog_GetFreeAddress(int* pNumRecords) {
       addr += (sizeof(LOG_HDR) + sizeof(IMU_RECORD));
       if (hdr.baroFlags || hdr.gpsFlags) addr += sizeof(BARO_RECORD);
       if (hdr.gpsFlags) addr += sizeof(GPS_RECORD);
-      (*pNumRecords)++;
-	   if (((*pNumRecords) % 100) == 0) delayMs(10); // yield for task watchdog
+      numRecords++;
+	   if ((numRecords % 100) == 0) delayMs(10); // yield for task watchdog
       }
-   FlashLogFreeAddress = addr;
+   return numRecords;
    }
 
 
+uint32_t FlashLog_GetFreeAddress() {
+   uint32_t loAddr = 0;
+   uint32_t hiAddr = FLASH_SIZE_BYTES - 4;
+   uint32_t midAddr = ((loAddr+hiAddr)/2)&0xFFFFFFFE;
+   while (hiAddr > loAddr+4) {
+      uint32_t dw;
+      SpiFlash_ReadBuffer(midAddr, (uint8_t*)&dw, sizeof(uint32_t));
+      if (dw == 0xFFFFFFFF) {
+         hiAddr = midAddr;
+         }
+      else {
+         loAddr = midAddr;
+         }
+      midAddr = ((loAddr+hiAddr)/2)&0xFFFFFFFE;
+      }
+   ESP_LOGI(TAG,"Lo %d mid %d hi %d", loAddr, midAddr, hiAddr);
+   return midAddr;
+   }
+
+    
 // ensure this function is called within a mutex take/give as there are multiple tasks
 // updating the log record
 void FlashLog_WriteRecord(FLASHLOG_RECORD* pRecord) {

@@ -5,8 +5,11 @@
 #include "driver/gpio.h"
 
 // Only the gps module tx pin is connected to uart1 rx pin
-// The ublox gps module was configured offline with u-center v8.26
-// to generate UBX binary protocol NAV_PVT packets @ 10Hz, 115200baudrate
+// The atgm332d-5N ublox compatible gps module was configured offline with 
+// ublox u-center v8.26 to generate UBX binary protocol NAV_PVT packets @ 10Hz, 
+// 115200baud
+
+#define GPS_UART_NUM   UART_NUM_1
 
 #define pinGpsTXD  (-1)
 #define pinGpsRXD  (22)
@@ -61,13 +64,9 @@
 #define LED_ON() 		{GPIO.out_w1ts = (1 << pinLED);}
 #define LED_OFF()		{GPIO.out_w1tc = (1 << pinLED);}
 
-// ideally want to use the data ready interrupt from imu module,
-// but it's not working, maybe soldering issue, can't see the signal
-// on the pcb pin. so we're polling for the samples
-#define pinDRDYINT	21
+#define pinDRDYINT	4
 
 #define FLASH_W25Q128  // 128Mbit 104MHz
-//#define FLASH_W25Q16   // 16Mbit 104MHz
 
 
 #endif

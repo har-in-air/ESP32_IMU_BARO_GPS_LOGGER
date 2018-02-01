@@ -2,35 +2,27 @@
 #define MAX21100_H_
 
 #define USE_MAG
-//#define SET_REG_CORR
 
 #define MAX21100_START_UP_DELAY_MS   100
-#define MAX21100_SAMPLE_DELAY_MS       4  // 250Hz ODR
 
-// gyroscope
+// gyroscope, digits/dps
 #define MAX21100_2000DPS_SENSITIVITY 	15.0f
 #define MAX21100_1000DPS_SENSITIVITY 	30.0f
-#define MAX21100_500DPS_SENSITIVITY 	60.0f // digits / dps
-#define MAX21100_250DPS_SENSITIVITY    120.0f // digits / dps
+#define MAX21100_500DPS_SENSITIVITY 	60.0f 
+#define MAX21100_250DPS_SENSITIVITY    120.0f
 
-// accelerometer
-#define MAX21100_4G_SENSITIVITY 	7.5f // digits / mg
-#define MAX21100_2G_SENSITIVITY 	15.0f // digits / mg
+// accelerometer, digits/mG
+#define MAX21100_4G_SENSITIVITY 	7.5f 
+#define MAX21100_2G_SENSITIVITY 	15.0f
 
-// magnetometer
-#define HMC5883L_19_SENSITIVITY		0.82f  // digits / mgauss
+// magnetometer, digits/mGauss (not used)
+#define HMC5883L_19_SENSITIVITY		0.82f
 #define HMC5883L_25_SENSITIVITY		0.66f 
 #define HMC5883L_40_SENSITIVITY		0.44f 
 
-
-// for MAX21100_GYRO_CORR_X etc, scale to be used when programming is 1 lsb = 8.3millidps, and write (-bias)
-// for MAX21100_ACC_CORR_X etc, scale to be used when programming is 1 lsb = 8millig, and write (-bias)
-// for MAX21100_MAG_CORR_X etc. use same scale as what is programmed in magnetometer, and write (-bias)
-
-
 // MAX21100 Common Bank
-#define MAX21100_WHO_AM_I      0x20    // should return 0xB2              
-#define MAX21100_REVISION_ID 0x21                                                                          
+#define MAX21100_WHO_AM_I      0x20            
+#define MAX21100_REVISION_ID   0x21                                                                          
 #define MAX21100_BANK_SELECT   0x22      
 #define MAX21100_SYSTEM_STATUS 0x23
 #define MAX21100_GYRO_X_H      0x24
@@ -137,7 +129,7 @@
 #define MAX21100_FUS_CFG1        0x1D
 #define MAX21100_ODR_TRIM     	0x1F
 
-#define GYRO_MAX_EXPECTED_OFFSET_1000DPS  50
+#define GYRO_MAX_EXPECTED_OFFSET_1000DPS  100
 
 #define STATUS_QUAT_ERR		0x80
 #define STATUS_QUAT_DR		0x40
@@ -260,18 +252,20 @@ void MAX21100_ReadBuf(uint8_t addr, uint8_t autoIncrement, int numBytes, uint8_t
 void MAX21100_InitCalibrationParams(void);
 int MAX21100_CalibrateGyro(void);
 void MAX21100_CalibrateAccel(void);
+int MAX21100_CalibrateMag(void);
 
 void MAX21100_ConfigureGyroAccel(void);
 void MAX21100_GetGyroAccelData(float* pGyroData, float* pAccelData);
-void MAX21100_GetAcceleration(int16_t* ax, int16_t* ay, int16_t* az);
-void MAX21100_GetRotation(int16_t* gx, int16_t* gy, int16_t* gz);
+//void MAX21100_GetAcceleration(int16_t* ax, int16_t* ay, int16_t* az);
+//void MAX21100_GetRotation(int16_t* gx, int16_t* gy, int16_t* gz);
+//void MAX21100_GetMag(int16_t* mx, int16_t* my, int16_t* mz);
+void MAX21100_GetVector(uint8_t startAddr, int16_t* px, int16_t* py, int16_t* pz);
+
 
 #ifdef USE_MAG
-void MAX21100_GetQuaternions(float* pQuat);
 void MAX21100_ConfigureGyroAccelMag(void);
 void MAX21100_GetGyroAccelMagData(float* pGyroData, float* pAccelData, float* pMagData);
 void MAX21100_GetGyroAccelMagDataRaw(int16_t* pGyroData, int16_t* pAccelData, int16_t* pMagData);
-void MAX21100_GetMagData( float* pMagData);
 #endif
 
 

@@ -17,13 +17,12 @@ esp_err_t esp32_wifi_eventHandler(void *ctx, system_event_t *event) {
 			break;
 
 		case SYSTEM_EVENT_STA_DISCONNECTED: 
-			ESP_LOGI(TAG, "Station disconnected, init as AP");
+			ESP_LOGE(TAG, "sta_disconnected ? How did we get here ...");
 			wifiInitAccessPoint();
 			break;
 
 		case SYSTEM_EVENT_STA_GOT_IP: 
-			ESP_LOGI(TAG, "Now a station on %s network", CONFIG_WIFI_SSID);
-			ESP_LOGI(TAG, "Connect to http://" IPSTR, IP2STR(&event->event_info.got_ip.ip_info.ip));
+			ESP_LOGE(TAG, "sta_got_IP ? How did we get here ...");
 			break;
 
 		default: 
@@ -80,6 +79,9 @@ void http_server_netconn_serve(struct netconn *conn) {
 		buf[buflen] = 0;
 		ESP_LOGI(TAG,"%s", buf);
 
+      // to save the binary log file as data<xyz>, e.g. dataThu9am, just
+      // open the webpage at 192.168.4.1/dataThu9am
+      // Only the first four chars are matched  
 		if (strncmp(buf,"GET /data",9) == 0) {
 			serveLogData(conn);
 			}

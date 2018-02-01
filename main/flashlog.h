@@ -56,12 +56,13 @@ extern int                 IsLogging;
 extern uint32_t            FlashLogFreeAddress;
 
 int   FlashLog_Init(void);
-void  FlashLog_GetFreeAddress(int* pNumRecords);
+int   FlashLog_IsEmpty(void);
 void 	FlashLog_EraseChip(void);
 void 	FlashLog_Erase(void);
 void 	FlashLog_WriteRecord(FLASHLOG_RECORD* pRecord);
 void 	FlashLog_ReadRecord(uint32_t addr, FLASHLOG_RECORD* pRecord);
-
+uint32_t FlashLog_GetFreeAddress();
+int   FlashLog_GetNumRecords();
 
 #endif
 
